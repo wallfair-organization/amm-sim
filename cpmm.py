@@ -7,11 +7,9 @@
 
 # @Marcin: Let's focus on binary outcome with 50:50 distribution initial
 
-#import
+import random 
+#import numpy #sample from different distributions // uniform, bernoulli, X^2
 
-#configutation parameters
-#tbd
-#number_users
 
 #global state parameters
 lp_token = 0
@@ -21,19 +19,13 @@ buy_price_yes = 0
 sell_price_yes = 0
 buy_price_no = 0
 sell_price_no = 0
-history = [("activity", "type" "amount", "token_buy_price_old", "token_buy_price_new", "returned tokens", "lp_yes", "lp_no", "lp_token")]
+history = [("activity", "type", "amount", "token_buy_price_old", "token_buy_price_new", "returned tokens", "lp_yes", "lp_no", "lp_token")]
 
 def create_event(liquidity):
 	add_liquidity(liquidity)
 
 def add_liquidity(amount):
-	global lp_token 
-	global lp_yes 
-	global lp_no 
-	global buy_price_yes 
-	global sell_price_yes 
-	global buy_price_no
-	global sell_price_no
+	global history, lp_token, lp_yes, lp_no, buy_price_yes, sell_price_yes, buy_price_no, sell_price_no
 
 	lp_token = lp_token + amount
 	lp_yes = lp_yes + amount
@@ -42,10 +34,8 @@ def add_liquidity(amount):
 	buy_price_yes = (buy_price_yes + amount) /  (lp_yes + lp_no)
 	sell_price_yes = (sell_price_yes + amount) /  (lp_yes + lp_no)
 	buy_price_no = (buy_price_no + amount) /  (lp_yes + lp_no)
-	
 	sell_price_no = (sell_price_no + amount) / (lp_yes + lp_no)
 	
-	global history
 	entry = ("add", "liquidity", amount, buy_price_yes_old,  buy_price_yes, "0", lp_yes, lp_no, lp_token)
 	history.append(entry)
 
@@ -56,7 +46,10 @@ def add_liquidity(amount):
 
 def buy_token(type, amount): #yes=1 | no = 0
 	
-	global history
+	global history, lp_yes, lp_no, lp_token, buy_price_yes, buy_price_no
+
+	lp_token = lp_token + amount
+
 	if type:
 		
 		lp_yes += amount
@@ -92,8 +85,19 @@ def buy_token(type, amount): #yes=1 | no = 0
 
 
 def main():
-	#
-	create_event(100)
+	
+	#experiment 1
+	
+	
+	n = 100 # n= 100 trades
+	
+	create_event(100) # amount=100 // intial liquidity, fixed
+	
+	for i in range(n):
+		b = random.getrandbits(1) # yes/no uniformly sampled
+		amount = random.randint(1,50) # buy range [1,50], uniformly sampled 
+		buy_token(b, amount)
+
 	print(history)
 
 if __name__ == "__main__":
