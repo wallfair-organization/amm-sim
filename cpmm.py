@@ -141,6 +141,9 @@ class CPMM(object):
 
 
 def run_experiment(name, cpmm: CPMM, n, prior_dist, betting_dist):
+	# TODO: must have realistic model for betting behavior, for example
+	# total bets volume cannot cross % of liquidity
+	# individual bet cannot have slippage > 1% etc.
 	bet_outcomes = prior_dist(n)
 	bet_amounts = betting_dist(n)
 
