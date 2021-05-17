@@ -4,147 +4,172 @@
 # simulate different liquidity provision and trading strategies
 #
 
-
-# @Marcin: Let's focus on binary outcome with 50:50 distribution initial
-
-import random
+from typing import Tuple
 
 import csv
-from numpy import apply_along_axis
+import numpy as np
 import pandas as pd
-#import numpy #sample from different distributions // uniform, bernoulli, X^2
+from numpy.random import binomial, default_rng
 
 # TODO: switch to decimal type and control quantization. numeric errors will kill us quickly
 
 
-#global state parameters
-initial_liquidity = 0
-lp_token = 0
-lp_yes = 0
-lp_no = 0
-buy_price_yes = 0
-sell_price_yes = 0
-buy_price_no = 0
-sell_price_no = 0
-history = []
+class CPMM(object):
+	def __init__(self) -> None:
+		self.initial_liquidity = 0
+		self.lp_token = 0
+		self.lp_yes = 0
+		self.lp_no = 0
+		self.buy_price_yes = 0
+		self.sell_price_yes = 0
+		self.buy_price_no = 0
+		self.sell_price_no = 0
+		self.history = []
 
-def create_event(liquidity):
-	global initial_liquidity
+	def create_event(self, liquidity) -> None:
+		self.initial_liquidity = liquidity
+		self.add_liquidity(liquidity)
 
-	initial_liquidity = liquidity
-	add_liquidity(liquidity)
+	def add_liquidity(self, amount):
+		self.lp_token += amount
+		self.lp_yes += amount
+		self.lp_no += amount
 
-def add_liquidity(amount):
-	global history, lp_token, lp_yes, lp_no, buy_price_yes, sell_price_yes, buy_price_no, sell_price_no
-
-	lp_token = lp_token + amount
-	lp_yes = lp_yes + amount
-	lp_no = lp_no + amount
-	# TODO: not sure those formulas are correct....
-	buy_price_yes_old = buy_price_yes
-	buy_price_yes = (buy_price_yes + amount) /  (lp_yes + lp_no)
-	sell_price_yes = (sell_price_yes + amount) /  (lp_yes + lp_no)
-	buy_price_no = (buy_price_no + amount) /  (lp_yes + lp_no)
-	sell_price_no = (sell_price_no + amount) / (lp_yes + lp_no)
-	
-	entry = ["add", "liquidity", amount, buy_price_yes_old,  buy_price_yes, 0, 0, lp_yes, lp_no, lp_token, 0 ,0]
-	history.append(entry)
-
-
-
-# def remove_liquidity(amount):
-	
-
-def buy_token(type, amount): #yes=1 | no = 0
-	global history, lp_yes, lp_no, lp_token, buy_price_yes, buy_price_no, initial_liquidity
-
-	# keep invariant
-	k = (lp_yes * lp_no)
-	# add liquidity
-	lp_token = lp_token + amount
-
-	if type:
-		x = k / (lp_no + amount) - lp_yes
-		tokens_return = amount - x
-
-		buy_price_yes_old = buy_price_yes
-		buy_price_yes = amount / tokens_return
-		# calc slippage
-		marginal_price_yes = lp_no / (lp_no + lp_yes)
-		slippage_yes = (buy_price_yes - marginal_price_yes) / marginal_price_yes
-		assert(slippage_yes > 0)
-
-		# remove returned token form the pool, keep all no tokens
-		lp_yes += x
-		lp_no += amount
+		# TODO: not sure those formulas are correct....
+		total_pool = self.lp_yes + self.lp_no
+		buy_price_yes_old = self.buy_price_yes
+		self.buy_price_yes = (self.buy_price_yes + amount) /  total_pool
+		self.sell_price_yes = (self.sell_price_yes + amount) /  total_pool
+		self.buy_price_no = (self.buy_price_no + amount) /  total_pool
+		self.sell_price_no = (self.sell_price_no + amount) / total_pool
 		
-		entry = ["buy", "yes", amount, buy_price_yes_old,  buy_price_yes, slippage_yes, tokens_return, lp_yes, lp_no, lp_token, 0, 0]
-	else:
-		x = k / (lp_yes + amount) - lp_no
-		tokens_return = amount - x
+		entry = ["add", "liquidity", amount, buy_price_yes_old,  self.buy_price_yes, 0, 0, self.lp_yes, self.lp_no, self.lp_token, 0 ,0]
+		self.history.append(entry)
 
-		buy_price_no_old = buy_price_no
-		buy_price_no = amount / tokens_return
-		# calc slippage
-		marginal_price_no = lp_yes / (lp_no + lp_yes)
-		slippage_no = (buy_price_no - marginal_price_no) / marginal_price_no
-		assert(slippage_no > 0)
+		# should return amount of outcome token
+		# return (type, amount)
 
-		# remove returned token form the pool, keep all yes tokens
-		lp_no += x
-		lp_yes += amount
-
-		entry = ["buy", "no", amount, buy_price_no_old,  buy_price_no, slippage_no, tokens_return, lp_yes, lp_no, lp_token, 0, 0]
-
-	# assert invariant, we use float and disregard rounding so must be within e ~ 0
-	print(f"invariant {k} {lp_yes * lp_no}")
-	assert(abs(k - (lp_yes * lp_no)) < 0.000001)
-	
-	# calculate impermanent loss for initial LP assuming 50:50 split
-	# convert matching yes/no into collateral
-	withdraw_token = min(lp_yes, lp_no)
-	impermanent_loss = initial_liquidity - withdraw_token
-	assert(impermanent_loss >= 0)
-	# outstanding yes/no token may be converted at event outcome to reward or immediately traded
-	if lp_yes > lp_no:
-		outstanding_token = lp_yes - withdraw_token
-	else:
-		outstanding_token = lp_no - withdraw_token
-	
-	# impermanent loss at last position in history entry
-	entry[-2] = impermanent_loss
-	entry[-1] = outstanding_token
-
-	history.append(entry)
+	# def remove_liquidity(amount):
 		
-# def sell_token(type, amount):
+	def buy_token(self, type, amount) -> Tuple[int, float]: #yes=1 | no = 0
+		# keep invariant
+		k = (self.lp_yes * self.lp_no)
+		# add liquidity
+		self.lp_token += amount
 
-# def get_buy_price_yes():
+		if type:
+			x = k / (self.lp_no + amount) - self.lp_yes
+			tokens_return = amount - x
 
-# def get_sell_price_yes():
+			buy_price_yes_old = self.buy_price_yes
+			self.buy_price_yes = amount / tokens_return
+			# calc slippage
+			marginal_price_yes = self.lp_no / (self.lp_no + self.lp_yes)
+			slippage_yes = (self.buy_price_yes - marginal_price_yes) / marginal_price_yes
+			assert(slippage_yes > 0)
+
+			# remove returned token form the pool, keep all no tokens
+			self.lp_yes += x
+			self.lp_no += amount
+			
+			entry = ["buy", "yes", amount, buy_price_yes_old,  self.buy_price_yes, slippage_yes, tokens_return, self.lp_yes, self.lp_no, self.lp_token, 0, 0]
+		else:
+			x = k / (self.lp_yes + amount) - self.lp_no
+			tokens_return = amount - x
+
+			buy_price_no_old = self.buy_price_no
+			self.buy_price_no = amount / tokens_return
+			# calc slippage
+			marginal_price_no = self.lp_yes / (self.lp_no + self.lp_yes)
+			slippage_no = (self.buy_price_no - marginal_price_no) / marginal_price_no
+			assert(slippage_no > 0)
+
+			# remove returned token form the pool, keep all yes tokens
+			self.lp_no += x
+			self.lp_yes += amount
+
+			entry = ["buy", "no", amount, buy_price_no_old,  self.buy_price_no, slippage_no, tokens_return, self.lp_yes, self.lp_no, self.lp_token, 0, 0]
+
+		# assert invariant, we use float and disregard rounding so must be within e ~ 0
+		# print(f"invariant {k} {self.lp_yes * self.lp_no}")
+		assert(abs(k - (self.lp_yes * self.lp_no)) < 0.000001)
+		
+		# calculate impermanent loss for initial LP assuming 50:50 split
+		# convert matching yes/no into collateral
+		withdraw_token = min(self.lp_yes, self.lp_no)
+		impermanent_loss = self.initial_liquidity - withdraw_token
+		assert(impermanent_loss >= 0)
+		# outstanding yes/no token may be converted at event outcome to reward or immediately traded
+		if self.lp_yes > self.lp_no:
+			outstanding_token = self.lp_yes - withdraw_token
+		else:
+			outstanding_token = self.lp_no - withdraw_token
+		
+		# impermanent loss at last position in history entry
+		entry[-2] = impermanent_loss
+		entry[-1] = outstanding_token
+
+		self.history.append(entry)
+
+		return (type, tokens_return)
+			
+	# def sell_token(type, amount):
+
+	# def get_buy_price_yes():
+
+	# def get_sell_price_yes():
+
+	@property
+	def history_as_dataframe(self) -> pd.DataFrame:
+		return pd.DataFrame(data=self.history, columns=["activity", "type", "amount", "token_buy_price_old", "token_buy_price_new", "slippage", "returned tokens", "lp_yes", "lp_no", "lp_token", "impermanent_loss", "loss_outstanding_tokens"])
+
+	def save_history(self, name) -> None:
+		df = self.history_as_dataframe
+		with open(name, "wt") as f:
+			df.to_csv(f, index=False, quoting=csv.QUOTE_NONNUMERIC)
+
+
+def run_experiment(name, cpmm: CPMM, n, prior_dist, betting_dist):
+	bet_outcomes = prior_dist(n)
+	bet_amounts = betting_dist(n)
+
+	print(f"{name}: bet outcomes N/Y {np.bincount(bet_outcomes)}")
+
+	for b, amount in zip(bet_outcomes, bet_amounts):
+		cpmm.buy_token(b, amount)
+
+	# print(cpmm.history)
+	cpmm.save_history(f"{name}.csv")
 
 
 def main():
-	
-	#experiment 1
-	
-	
-	n = 100 # n= 100 trades
-	
-	create_event(100) # amount=100 // intial liquidity, fixed
-	
-	for i in range(n):
-		# TODO: use bernoulli dist to simulate prior diffferent than 50:50
-		b = random.getrandbits(1) # yes/no uniformly sampled
-		# TODO: sample amounts from some power law distribution to approx. real behavior (or take data from polymarket)
-		# TODO: compute slippage and bail off when too large
-		amount = random.randint(1,50) # buy range [1,50], uniformly sampled 
-		buy_token(b, amount)
+	rng = default_rng()
 
-	print(history)
-	df = pd.DataFrame(data=history, columns=["activity", "type", "amount", "token_buy_price_old", "token_buy_price_new", "slippage", "returned tokens", "lp_yes", "lp_no", "lp_token", "impermanent_loss", "loss_outstanding_tokens"])
-	with open("experiment1.csv", "w") as f:
-		df.to_csv(f, index=False, quoting=csv.QUOTE_NONNUMERIC)
+	# experiment 1
+	# 1000 rounds, initial liquidity 50:50 1000 EVNT, betters prior 50:50, bets integer uniform range [1, initial/2]
+	
+	cpmm = CPMM()
+	cpmm.create_event(100) # amount=100 // intial liquidity, fixed
+	run_experiment(
+		"experiment1",
+		cpmm,
+		1000,
+		lambda size: rng.binomial(1, 0.5, size),
+		lambda size: rng.integers(1, 50, endpoint=True, size=size)
+	)
+
+	# experiment 2
+	# 1000 rounds, initial liquidity 50:50 1000 EVNT, betters prior 70:30, bets integer uniform range [1, initial/2]
+
+	cpmm = CPMM()
+	cpmm.create_event(100) # amount=100 // intial liquidity, fixed
+	run_experiment(
+		"experiment2",
+		cpmm,
+		1000,
+		lambda size: rng.binomial(1, 0.7, size),
+		lambda size: rng.integers(1, 50, endpoint=True, size=size)
+	)
 
 if __name__ == "__main__":
     main()
