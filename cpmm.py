@@ -15,7 +15,7 @@ from numpy.random import binomial, default_rng
 
 
 class CPMM(object):
-	def __init__(self) -> None:
+	def __init__(self, fee_fraction = 0) -> None:
 		self.initial_liquidity = 0
 		self.lp_token = 0
 		self.lp_yes = 0
@@ -24,7 +24,9 @@ class CPMM(object):
 		self.sell_price_yes = 0
 		self.buy_price_no = 0
 		self.sell_price_no = 0
+		self.fee_pool = 0
 		self.history = []
+		self.fee_fraction = fee_fraction
 
 	def create_event(self, liquidity) -> None:
 		self.initial_liquidity = liquidity
@@ -43,17 +45,21 @@ class CPMM(object):
 		self.buy_price_no = (self.buy_price_no + amount) /  total_pool
 		self.sell_price_no = (self.sell_price_no + amount) / total_pool
 		
-		entry = ["add", "liquidity", amount, buy_price_yes_old,  self.buy_price_yes, 0, 0, self.lp_yes, self.lp_no, self.lp_token, 0 ,0]
-		self.history.append(entry)
+		entry = ["add", "liquidity", amount, 0, buy_price_yes_old,  self.buy_price_yes, 0, 0, self.lp_yes, self.lp_no, self.lp_token, self.fee_pool, 0 ,0]
+		self._add_history(entry)
 
 		# should return amount of outcome token
 		# return (type, amount)
 
 	# def remove_liquidity(amount):
 		
-	def buy_token(self, type, amount) -> Tuple[int, float]: #yes=1 | no = 0
+	def buy_token(self, type, original_amount) -> Tuple[int, float]: #yes=1 | no = 0
 		# keep invariant
 		k = (self.lp_yes * self.lp_no)
+		# take fee before any operation and store in fee_pool
+		fee = original_amount * self.fee_fraction
+		amount = original_amount - fee
+		self.fee_pool += fee
 		# add liquidity
 		self.lp_token += amount
 
@@ -72,7 +78,7 @@ class CPMM(object):
 			self.lp_yes += x
 			self.lp_no += amount
 			
-			entry = ["buy", "yes", amount, buy_price_yes_old,  self.buy_price_yes, slippage_yes, tokens_return, self.lp_yes, self.lp_no, self.lp_token, 0, 0]
+			entry = ["buy", "yes", original_amount, fee, buy_price_yes_old,  self.buy_price_yes, slippage_yes, tokens_return, self.lp_yes, self.lp_no, self.lp_token, self.fee_pool, 0, 0]
 		else:
 			x = k / (self.lp_yes + amount) - self.lp_no
 			tokens_return = amount - x
@@ -88,7 +94,7 @@ class CPMM(object):
 			self.lp_no += x
 			self.lp_yes += amount
 
-			entry = ["buy", "no", amount, buy_price_no_old,  self.buy_price_no, slippage_no, tokens_return, self.lp_yes, self.lp_no, self.lp_token, 0, 0]
+			entry = ["buy", "no", original_amount, fee, buy_price_no_old,  self.buy_price_no, slippage_no, tokens_return, self.lp_yes, self.lp_no, self.lp_token, self.fee_pool, 0, 0]
 
 		# assert invariant, we use float and disregard rounding so must be within e ~ 0
 		# print(f"invariant {k} {self.lp_yes * self.lp_no}")
@@ -108,8 +114,7 @@ class CPMM(object):
 		# impermanent loss at last position in history entry
 		entry[-2] = impermanent_loss
 		entry[-1] = outstanding_token
-
-		self.history.append(entry)
+		self._add_history(entry)
 
 		return (type, tokens_return)
 			
@@ -121,12 +126,18 @@ class CPMM(object):
 
 	@property
 	def history_as_dataframe(self) -> pd.DataFrame:
-		return pd.DataFrame(data=self.history, columns=["activity", "type", "amount", "token_buy_price_old", "token_buy_price_new", "slippage", "returned tokens", "lp_yes", "lp_no", "lp_token", "impermanent_loss", "loss_outstanding_tokens"])
+		return pd.DataFrame(data=self.history, columns=["activity", "type", "amount", "fee", "token_buy_price_old", "token_buy_price_new", "slippage", "returned tokens", "lp_yes", "lp_no", "lp_token", "fee_pool", "impermanent_loss", "loss_outstanding_tokens"])
 
 	def save_history(self, name) -> None:
 		df = self.history_as_dataframe
 		with open(name, "wt") as f:
 			df.to_csv(f, index=False, quoting=csv.QUOTE_NONNUMERIC)
+
+
+	def _add_history(self, entry) -> None:
+		# check entry size
+		assert(len(entry) == 14)
+		self.history.append(entry)
 
 
 def run_experiment(name, cpmm: CPMM, n, prior_dist, betting_dist):
@@ -146,29 +157,43 @@ def main():
 	rng = default_rng()
 
 	# experiment 1
-	# 1000 rounds, initial liquidity 50:50 1000 EVNT, betters prior 50:50, bets integer uniform range [1, initial/2]
+	# 1000 rounds, initial liquidity 50:50 1000 EVNT, betters prior 50:50, bets integer uniform range [1, 100]
 	
 	cpmm = CPMM()
-	cpmm.create_event(100) # amount=100 // intial liquidity, fixed
+	cpmm.create_event(1000)
 	run_experiment(
 		"experiment1",
 		cpmm,
 		1000,
 		lambda size: rng.binomial(1, 0.5, size),
-		lambda size: rng.integers(1, 50, endpoint=True, size=size)
+		lambda size: rng.integers(1, 100, endpoint=True, size=size)
 	)
 
 	# experiment 2
-	# 1000 rounds, initial liquidity 50:50 1000 EVNT, betters prior 70:30, bets integer uniform range [1, initial/2]
+	# 1000 rounds, initial liquidity 50:50 1000 EVNT, betters prior 70:30, bets integer uniform range [1, 100]
 
 	cpmm = CPMM()
-	cpmm.create_event(100) # amount=100 // intial liquidity, fixed
+	cpmm.create_event(1000)
 	run_experiment(
 		"experiment2",
 		cpmm,
 		1000,
 		lambda size: rng.binomial(1, 0.7, size),
-		lambda size: rng.integers(1, 50, endpoint=True, size=size)
+		lambda size: rng.integers(1, 100, endpoint=True, size=size)
+	)
+
+	# experiment 2
+	# 1000 rounds, initial liquidity 50:50 1000 EVNT, betters prior 70:30, bets integer uniform range [1, 100]
+	# fee 2% taken and not added to liquidity pool
+
+	cpmm = CPMM(fee_fraction=0.02)
+	cpmm.create_event(1000)
+	run_experiment(
+		"experiment3",
+		cpmm,
+		1000,
+		lambda size: rng.binomial(1, 0.7, size),
+		lambda size: rng.integers(1, 100, endpoint=True, size=size)
 	)
 
 if __name__ == "__main__":
