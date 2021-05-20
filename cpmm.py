@@ -155,6 +155,23 @@ class CPMM(object):
 
 		return (type, tokens_return)
 
+	def calc_payout(self) -> float:
+		# how big is reward after all liquidity is removed
+		return self.lp_token - min(self.lp_yes, self.lp_no)
+
+	def calc_outstanding_token(self) -> Tuple[int, float]:
+		# outcome tokens going to LP on top of removed liquidity
+		withdraw_token = min(self.lp_yes, self.lp_no)
+		if self.lp_yes > self.lp_no:
+			outstanding_token = (1, self.lp_yes - withdraw_token)
+		else:
+			outstanding_token = (0, self.lp_no - withdraw_token)
+		return outstanding_token
+
+	def calc_impermanent_loss(self) -> float:
+		withdraw_token = min(self.lp_yes, self.lp_no)
+		return self.liquidity - withdraw_token
+
 	def calc_buy(self, type, amount) -> float:
 		k = (self.lp_yes * self.lp_no)
 		if type:
@@ -172,7 +189,7 @@ class CPMM(object):
 		tokens_return, _ = self.calc_buy(type, amount)
 		buy_price = amount / tokens_return
 		marginal_price = self.calc_marginal_price(type)
-		return (buy_price - marginal_price) / marginal_price
+		return (buy_price - marginal_price) / buy_price
 
 	# def sell_token(type, amount):
 
