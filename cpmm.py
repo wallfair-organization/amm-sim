@@ -108,13 +108,10 @@ class CPMM(object):
 		self.lp_token += amount
 
 		if type:
-			x = k / (self.lp_no + amount) - self.lp_yes
-			tokens_return = amount - x
-
+			tokens_return, x = self.calc_buy(type, amount)
 			buy_price_yes = amount / tokens_return
 			# calc slippage
-			marginal_price_yes = self.lp_no / (self.lp_no + self.lp_yes)
-			slippage_yes = (buy_price_yes - marginal_price_yes) / marginal_price_yes
+			slippage_yes = self.calc_slippage(type, amount)
 			assert (slippage_yes > 0), f"slippage_yes {slippage_yes} <= 0"
 
 			# remove returned token form the pool, keep all no tokens
@@ -123,13 +120,9 @@ class CPMM(object):
 
 			entry = ["buy", "yes", original_amount, fee, buy_price_yes, slippage_yes, tokens_return, self.lp_yes, self.lp_no, self.lp_token, self.liquidity, self.fee_pool, 0, 0]
 		else:
-			x = k / (self.lp_yes + amount) - self.lp_no
-			tokens_return = amount - x
-
+			tokens_return, x = self.calc_buy(type, amount)
 			buy_price_no = amount / tokens_return
-			# calc slippage
-			marginal_price_no = self.lp_yes / (self.lp_no + self.lp_yes)
-			slippage_no = (buy_price_no - marginal_price_no) / marginal_price_no
+			slippage_no = self.calc_slippage(type, amount)
 			assert (slippage_no > 0),  f"slippage_no {slippage_no} <= 0"
 
 			# remove returned token form the pool, keep all yes tokens
@@ -161,6 +154,25 @@ class CPMM(object):
 		self._add_history(entry)
 
 		return (type, tokens_return)
+
+	def calc_buy(self, type, amount) -> float:
+		k = (self.lp_yes * self.lp_no)
+		if type:
+			x = k / (self.lp_no + amount) - self.lp_yes
+		else:
+			x = k / (self.lp_yes + amount) - self.lp_no
+		return amount - x, x
+
+
+	def calc_marginal_price(self, type) -> float:
+		pool_total = (self.lp_no + self.lp_yes)
+		return (self.lp_no if type else self.lp_yes) / pool_total
+
+	def calc_slippage(self, type, amount) -> float:
+		tokens_return, _ = self.calc_buy(type, amount)
+		buy_price = amount / tokens_return
+		marginal_price = self.calc_marginal_price(type)
+		return (buy_price - marginal_price) / marginal_price
 
 	# def sell_token(type, amount):
 
