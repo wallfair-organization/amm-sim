@@ -43,7 +43,7 @@ class CPMM(object):
 		self.initial_liquidity = intial_liquidity
 		rv = self._add_liquidity(intial_liquidity, initial_yes_to_no)
 		n_p = self.lp_yes / self.lp_no
-		print(f"invariant P {initial_yes_to_no} {n_p}")
+		# print(f"invariant P {initial_yes_to_no} {n_p}")
 		assert(abs(initial_yes_to_no - n_p) < 0.000001)
 		return rv
 
@@ -137,31 +137,30 @@ class CPMM(object):
 		# print(f"invariant K {k} {self.lp_yes * self.lp_no}")
 		assert(abs(k - (self.lp_yes * self.lp_no)) < 0.000001)
 
-		# calculate impermanent loss for initial LP assuming 50:50 split
-		# convert matching yes/no into collateral
-		withdraw_token = min(self.lp_yes, self.lp_no)
-		impermanent_loss = self.liquidity - withdraw_token
+		impermanent_loss = self.calc_impermanent_loss()
 		assert(impermanent_loss >= 0)
 		# outstanding yes/no token may be converted at event outcome to reward or immediately traded
-		if self.lp_yes > self.lp_no:
-			outstanding_token = self.lp_yes - withdraw_token
-		else:
-			outstanding_token = self.lp_no - withdraw_token
+		outstanding_token = self.calc_outstanding_token()
 
 		# impermanent loss at last position in history entry
 		entry[-2] = impermanent_loss
-		entry[-1] = outstanding_token
+		entry[-1] = outstanding_token[1]
 		self._add_history(entry)
 
 		return (type, tokens_return)
 
+	def calc_withdrawable_liquidity(self) -> float:
+		# calculate impermanent loss for initial LP assuming 50:50 split
+		# TODO: support other splits
+		return min(self.lp_yes, self.lp_no)
+
 	def calc_payout(self) -> float:
 		# how big is reward after all liquidity is removed
-		return self.lp_token - min(self.lp_yes, self.lp_no)
+		return self.lp_token - self.calc_withdrawable_liquidity()
 
 	def calc_outstanding_token(self) -> Tuple[int, float]:
 		# outcome tokens going to LP on top of removed liquidity
-		withdraw_token = min(self.lp_yes, self.lp_no)
+		withdraw_token = self.calc_withdrawable_liquidity()
 		if self.lp_yes > self.lp_no:
 			outstanding_token = (1, self.lp_yes - withdraw_token)
 		else:
@@ -169,17 +168,18 @@ class CPMM(object):
 		return outstanding_token
 
 	def calc_impermanent_loss(self) -> float:
-		withdraw_token = min(self.lp_yes, self.lp_no)
+		withdraw_token = self.calc_withdrawable_liquidity()
 		return self.liquidity - withdraw_token
 
-	def calc_buy(self, type, amount) -> float:
+	def calc_buy(self, type, amount) -> Tuple[float, float]:
 		k = (self.lp_yes * self.lp_no)
 		if type:
 			x = k / (self.lp_no + amount) - self.lp_yes
 		else:
 			x = k / (self.lp_yes + amount) - self.lp_no
-		return amount - x, x
 
+		# (tokens returned to the user, amm pool delta)
+		return amount - x, x
 
 	def calc_marginal_price(self, type) -> float:
 		pool_total = (self.lp_no + self.lp_yes)
