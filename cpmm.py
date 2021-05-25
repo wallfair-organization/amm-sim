@@ -28,11 +28,10 @@ class CPMM(object):
 		self.lp_yes = 0
 		# no tokens in the pool
 		self.lp_no = 0
-		# we do not need to store those (1) marginal prices you can always compute (2) actual prices are spot prices and depend on the amount bought (slippage)
-		# self.buy_price_yes = 0
-		# self.sell_price_yes = 0
-		# self.buy_price_no = 0
-		# self.sell_price_no = 0
+		# outstanding tokens held by LP
+		self.outstanding_yes = 0
+		self.outstanding_no = 0
+
 		self.fee_pool = 0
 		self.history = []
 		self.fee_fraction = fee_fraction
@@ -74,6 +73,7 @@ class CPMM(object):
 			self.lp_yes += amount
 
 			tokens_return = amount + old_lp_no - self.lp_no
+			self.outstanding_no += tokens_return
 		else:
 			# more into NO bucket, YES is returned
 			old_lp_yes = self.lp_yes
@@ -81,6 +81,7 @@ class CPMM(object):
 			self.lp_no += amount
 
 			tokens_return = amount + old_lp_yes - self.lp_yes
+			self.outstanding_yes += tokens_return
 
 		entry = ["add", "liquidity", amount, 0, yes_to_no, 0, tokens_return, self.lp_yes, self.lp_no, self.lp_token, self.liquidity, self.fee_pool, 0 ,0]
 		self._add_history(entry)
@@ -134,8 +135,12 @@ class CPMM(object):
 
 
 		# assert invariant, we use float and disregard rounding so must be within e ~ 0
-		# print(f"invariant K {k} {self.lp_yes * self.lp_no}")
-		assert(abs(k - (self.lp_yes * self.lp_no)) < 0.000001)
+		inv_div = abs(k - (self.lp_yes * self.lp_no))
+		# use variable epsilon - float numbers suck due to scaling
+		inv_eps = min(self.lp_no, self.lp_yes) / 100000000
+		if inv_div > inv_eps :
+			print(f"invariant K {k} {self.lp_yes * self.lp_no} == {inv_div}, lp_yes {self.lp_yes} lp_no {self.lp_no} eps {inv_eps}")
+		assert(inv_div < inv_eps)
 
 		impermanent_loss = self.calc_impermanent_loss()
 		assert(impermanent_loss >= 0)
@@ -150,9 +155,8 @@ class CPMM(object):
 		return (type, tokens_return)
 
 	def calc_withdrawable_liquidity(self) -> float:
-		# calculate impermanent loss for initial LP assuming 50:50 split
-		# TODO: support other splits
-		return min(self.lp_yes, self.lp_no)
+		# collateral taken from the pool and tokens returned when adding liquidity
+		return min(self.lp_yes + self.outstanding_yes, self.lp_no + self.outstanding_no)
 
 	def calc_payout(self) -> float:
 		# how big is reward after all liquidity is removed
@@ -161,10 +165,12 @@ class CPMM(object):
 	def calc_outstanding_token(self) -> Tuple[int, float]:
 		# outcome tokens going to LP on top of removed liquidity
 		withdraw_token = self.calc_withdrawable_liquidity()
-		if self.lp_yes > self.lp_no:
-			outstanding_token = (1, self.lp_yes - withdraw_token)
+		total_yes = self.lp_yes + self.outstanding_yes
+		total_no = self.lp_no + self.outstanding_no
+		if total_yes > total_no:
+			outstanding_token = (1, total_yes - withdraw_token)
 		else:
-			outstanding_token = (0, self.lp_no - withdraw_token)
+			outstanding_token = (0, total_no - withdraw_token)
 		return outstanding_token
 
 	def calc_impermanent_loss(self) -> float:
@@ -190,6 +196,14 @@ class CPMM(object):
 		buy_price = amount / tokens_return
 		marginal_price = self.calc_marginal_price(type)
 		return (buy_price - marginal_price) / buy_price
+
+	@staticmethod
+	def calc_british_odds(returned_tokens, amount) -> float:
+		# british odds https://www.investopedia.com/articles/investing/042115/betting-basics-fractional-decimal-american-moneyline-odds.asp
+		# shows the reward on top of stake as a decimal fraction to the stake
+		# (TODO: we could use Fraction class of python for nice odds representation)
+		# may be negative when due to cpmm inefficiencies
+		return (returned_tokens - amount) / amount
 
 	# def sell_token(type, amount):
 
@@ -278,7 +292,7 @@ def main():
 		lambda size: rng.integers(1, 100, endpoint=True, size=size)
 	)
 	
-		# experiment 4
+	# experiment 4
 	# 1000 rounds, initial liquidity 50:50 1000 EVNT, betters prior 50:50, bets integer uniform range [1, 100]
 	# fee 2% taken and  50% added to liquidity pool
 
@@ -286,6 +300,20 @@ def main():
 	cpmm.create_event(1000)
 	run_experiment(
 		"experiment4",
+		cpmm,
+		1000,
+		lambda size: rng.binomial(1, 0.5, size),
+		lambda size: rng.integers(1, 100, endpoint=True, size=size)
+	)
+
+	# experiment 5
+	# 1000 rounds, initial liquidity 1:3 1000 EVNT, betters prior 50:50, bets integer uniform range [1, 100]
+	# fee 2% taken and  50% added to liquidity pool
+
+	cpmm = CPMM(fee_fraction=0.02, fee_to_liquidity_fraction=0.5)
+	cpmm.create_event(1000)
+	run_experiment(
+		"experiment5",
 		cpmm,
 		1000,
 		lambda size: rng.binomial(1, 0.5, size),
