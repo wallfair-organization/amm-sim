@@ -35,6 +35,7 @@ minimum_range = 0
 approx_eps = 0.001
 
 # binary search
+i = 1
 while minimum_range <= maximum_range:
     mid_range = (minimum_range + maximum_range) / 2
     approx_sell = calc_sell(0, mid_range)
@@ -45,9 +46,11 @@ while minimum_range <= maximum_range:
         minimum_range = mid_range
     else:
         maximum_range = mid_range
+    i += 1
 
 # our quote in EVNT for 100 outcome tokens
 print(mid_range)
+print(f"{i} iterations")
 
 # verify
 verify_sell = calc_sell(0, mid_range)
